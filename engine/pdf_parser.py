@@ -212,20 +212,50 @@ def is_clipping_block(tokens: list[str], start: int, end: int) -> bool:
 # Layer filters
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Operators that affect text/color rendering and may appear OUTSIDE BT…ET.
+# We carry them forward so text in the text-layer PDF keeps its correct color.
+# ---------------------------------------------------------------------------
+_INHERITED_OPS: frozenset[str] = frozenset({
+    # Fill colour
+    'g', 'rg', 'k', 'sc', 'scn', 'cs',
+    # Stroke colour
+    'G', 'RG', 'K', 'SC', 'SCN', 'CS',
+    # Line / text properties
+    'w', 'M', 'J', 'j', 'ri',
+    # Extended graphics-state dictionary  (e.g. /GS0 gs)
+    'gs',
+})
+
+
+def _is_operator(tok: str) -> bool:
+    """Return True if *tok* looks like a PDF operator (not a number/name/string)."""
+    if not tok:
+        return False
+    c = tok[0]
+    return c not in '/([<' and not (c.isdigit() or c in '.+-')
+
+
 def filter_text_layer(tokens: list[str]) -> list[str]:
     """
-    Return a token list that contains ONLY the content of BT…ET blocks.
+    Return a token list that keeps BT…ET blocks AND any colour / graphics-state
+    operators that appear immediately outside BT…ET (so text retains its fill
+    colour instead of rendering as outline-only).
 
-    Also handles inline images (BI…EI) by skipping them entirely.
-    Everything outside BT…ET is removed.
+    Inline images (BI…EI) are skipped entirely.
+    Path-drawing operators and XObject invocations outside BT…ET are dropped.
     """
     result: list[str] = []
     in_bt = False
     in_bi = False
+    pending: list[str] = []    # operands waiting for their operator
+    state_ops: list[str] = []  # state operators to emit just before next BT
 
     for tok in tokens:
+        # ---- inline image -------------------------------------------------
         if tok == 'BI':
             in_bi = True
+            pending = []
             continue
         if tok == 'EI':
             in_bi = False
@@ -233,14 +263,31 @@ def filter_text_layer(tokens: list[str]) -> list[str]:
         if in_bi:
             continue
 
+        # ---- inside BT…ET → keep everything --------------------------------
         if tok == 'BT':
+            result.extend(state_ops)   # inject accumulated colour/state
+            state_ops = []
+            pending = []
             in_bt = True
             result.append(tok)
         elif tok == 'ET':
             result.append(tok)
             in_bt = False
+            pending = []
         elif in_bt:
             result.append(tok)
+
+        # ---- outside BT…ET → track state operators only --------------------
+        else:
+            if _is_operator(tok):
+                if tok in _INHERITED_OPS:
+                    # keep this operator and its preceding operands
+                    state_ops.extend(pending)
+                    state_ops.append(tok)
+                # always reset pending after any operator
+                pending = []
+            else:
+                pending.append(tok)
 
     return result
 
