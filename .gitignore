@@ -1,0 +1,9 @@
+pdf-assets/
+test_output/
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.spec.bak
