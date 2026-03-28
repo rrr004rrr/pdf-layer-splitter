@@ -226,6 +226,10 @@ _INHERITED_OPS: frozenset[str] = frozenset({
 # Fill-colour operators whose operands determine if colour is white.
 _FILL_COLOUR_OPS: frozenset[str] = frozenset({'g', 'rg', 'k'})
 
+# Fill-colour operators whose colour value is opaque / unknown (alternate colorspace).
+# When seen, assume fill is non-white so we don't accidentally keep coloured fills.
+_FILL_COLOUR_UNKNOWN: frozenset[str] = frozenset({'cs', 'sc', 'scn'})
+
 # Path-construction operators.
 _PATH_OPS: frozenset[str] = frozenset({'m', 'l', 'c', 'v', 'y', 'h', 're'})
 
@@ -283,7 +287,7 @@ def filter_text_layer(tokens: list[str]) -> list[str]:
     clip_pending = False         # saw W / W* in this path → it's a clip
 
     # Track fill colour across q / Q nesting (stack, approach 1)
-    fill_white_stack: list[bool] = [True]   # default: white
+    fill_white_stack: list[bool] = [False]  # default: non-white (PDF default fill is black)
 
     def fill_white() -> bool:
         return fill_white_stack[-1]
@@ -331,6 +335,9 @@ def filter_text_layer(tokens: list[str]) -> list[str]:
             elif tok in _INHERITED_OPS:
                 if tok in _FILL_COLOUR_OPS:
                     fill_white_stack[-1] = _colour_is_white(tok, pending)
+                elif tok in _FILL_COLOUR_UNKNOWN:
+                    # Alternate colorspace – colour value is opaque; assume non-white.
+                    fill_white_stack[-1] = False
                 state_ops.extend(pending)
                 state_ops.append(tok)
                 pending = []
@@ -350,16 +357,20 @@ def filter_text_layer(tokens: list[str]) -> list[str]:
 
             # --- fill / stroke operators ---
             elif tok in _FILL_OPS:
-                if fill_white() or clip_pending:   # keep white masks
+                if fill_white():
+                    # White (or near-white) fill: keep as-is (white mask rect)
                     result.extend(path_buf)
                     result.extend(pending)
                     result.append(tok)
+                elif clip_pending:
+                    # Non-white fill that includes a clip (W f / W* f etc.):
+                    # preserve the clip path but drop the paint (W f → W n).
+                    result.extend(path_buf)
+                    result.extend(pending)
+                    result.append('n')
                 path_buf = []; clip_pending = False; pending = []
 
-            elif tok in _STROKE_OPS:               # keep strokes (borders)
-                result.extend(path_buf)
-                result.extend(pending)
-                result.append(tok)
+            elif tok in _STROKE_OPS:               # drop – strokes belong to background layer
                 path_buf = []; clip_pending = False; pending = []
 
             elif tok == 'n':                        # end-path (no paint)
