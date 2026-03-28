@@ -358,7 +358,9 @@ def filter_text_layer(tokens: list[str]) -> list[str]:
             # --- fill / stroke operators ---
             elif tok in _FILL_OPS:
                 if fill_white():
-                    # White (or near-white) fill: keep as-is (white mask rect)
+                    # White mask rect: explicitly set fill to white so the path
+                    # renders white regardless of the inherited colour state.
+                    result += ['1', 'g']
                     result.extend(path_buf)
                     result.extend(pending)
                     result.append(tok)
