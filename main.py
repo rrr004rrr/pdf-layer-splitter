@@ -5,16 +5,21 @@ Run:
     python main.py
 """
 
-import sys
 import tkinter as tk
 from tkinter import ttk
+
+try:
+    from tkinterdnd2 import TkinterDnD
+    _HAS_DND = True
+except ImportError:
+    _HAS_DND = False
 
 from gui.main_window import MainWindow
 
 
 def main():
-    root = tk.Tk()
-    root.geometry("1280x780")
+    root = TkinterDnD.Tk() if _HAS_DND else tk.Tk()
+    root.geometry("1280x860")
 
     # Apply a built-in theme that looks reasonable on Windows
     style = ttk.Style(root)
@@ -24,8 +29,6 @@ def main():
             style.theme_use(preferred)
             break
 
-    # Dark-ish backgrounds for the canvas areas are set per-widget;
-    # here we only set the Tk root colour.
     root.configure(bg='#2b2b2b')
 
     app = MainWindow(root)

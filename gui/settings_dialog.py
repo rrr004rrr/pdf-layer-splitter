@@ -18,10 +18,10 @@ class SettingsDialog(tk.Toplevel):
 
         # ---- variables ---------------------------------------------------
         self._dpi        = tk.IntVar(value=current.get('dpi', 300))
-        self._ssim       = tk.DoubleVar(value=current.get('ssim_threshold', 0.95))
-        self._max_iter   = tk.IntVar(value=current.get('max_iterations', 200))
+        self._ssim       = tk.DoubleVar(value=current.get('ssim_threshold', 1.0))
+        self._max_iter   = tk.IntVar(value=current.get('max_iterations', 1000))
         self._output_dir = tk.StringVar(value=current.get('output_dir', ''))
-        self._parallel   = tk.BooleanVar(value=current.get('parallel_pages', False))
+        self._parallel   = tk.BooleanVar(value=current.get('parallel_pages', True))
 
         # ---- layout ------------------------------------------------------
         pad = {'padx': 10, 'pady': 5}
@@ -44,7 +44,7 @@ class SettingsDialog(tk.Toplevel):
         row += 1
 
         label("Max Iterations / 最大迭代次數:", row)
-        ttk.Spinbox(frame, from_=10, to=1000, increment=10,
+        ttk.Spinbox(frame, from_=10, to=5000, increment=100,
                     textvariable=self._max_iter, width=8).grid(row=row, column=1, sticky='w', **pad)
         row += 1
 

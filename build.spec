@@ -1,7 +1,7 @@
 # PyInstaller build spec for PDF Layer Splitter
 # Run:  pyinstaller build.spec
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
 
@@ -11,6 +11,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('assets', 'assets'),
+        *collect_data_files('tkinterdnd2'),
     ],
     hiddenimports=[
         'tkinter',
@@ -21,6 +22,7 @@ a = Analysis(
         *collect_submodules('fitz'),
         *collect_submodules('skimage'),
         *collect_submodules('PIL'),
+        *collect_submodules('tkinterdnd2'),
     ],
     hookspath=[],
     hooksconfig={},
