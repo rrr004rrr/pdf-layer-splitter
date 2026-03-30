@@ -30,6 +30,7 @@ from .image_comparator import render_page
 from .mask_resolver import resolve_page
 from utils.logger import logger
 from utils.file_helper import is_encrypted
+from utils.margin_helper import apply_margins
 
 # ---------------------------------------------------------------------------
 # Callback type
@@ -110,12 +111,14 @@ class ProcessingEngine:
         max_iterations: int = 200,
         output_dir: str | None = None,
         parallel_pages: bool = False,
+        margin_settings: dict | None = None,
     ):
         self.dpi = dpi
         self.ssim_threshold = ssim_threshold
         self.max_iterations = max_iterations
         self.output_dir = output_dir
         self.parallel_pages = parallel_pages
+        self.margin_settings = margin_settings or {}
         self._cancelled = threading.Event()
         self._worker: threading.Thread | None = None
 
@@ -194,6 +197,9 @@ class ProcessingEngine:
         text_doc.save(text_out, garbage=4, deflate=True)
         text_doc.close()
         logger.info(f"Text layer saved → {text_out}")
+        if self.margin_settings:
+            apply_margins(text_out, self.margin_settings)
+            logger.info(f"Margins applied to text layer")
 
         # ---- Phase 2: background layer with mask resolver ----------------
         logger.info("Phase 2: Extracting background layer …")
@@ -239,5 +245,8 @@ class ProcessingEngine:
         orig_doc.close()
 
         logger.info(f"Background layer saved → {bg_out}")
+        if self.margin_settings:
+            apply_margins(bg_out, self.margin_settings)
+            logger.info(f"Margins applied to background layer")
         if cb:
             cb('done', n - 1, n, None, None, None, 1.0, f"{text_out}\n{bg_out}")

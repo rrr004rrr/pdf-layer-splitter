@@ -49,15 +49,17 @@ pdf_splitter/
 │   ├── main_window.py      # Main window layout and event binding
 │   ├── preview_panel.py    # Left panel: per-page thumbnail list
 │   ├── compare_panel.py    # Center: 3-panel Reference/Candidate/Diff display
-│   └── settings_dialog.py  # Settings dialog
+│   ├── settings_dialog.py  # Engine parameter settings dialog
+│   └── margin_dialog.py    # Page margin settings dialog (mm, per-scope)
 ├── engine/
-│   ├── pdf_parser.py       # PyMuPDF object tree parsing and classification
-│   ├── layer_extractor.py  # Text/background layer extraction
+│   ├── pdf_parser.py       # Content-stream tokenizer and layer filters
+│   ├── layer_extractor.py  # Text/background layer extraction orchestrator
 │   ├── mask_resolver.py    # Clipping mask removal loop (core algorithm)
 │   └── image_comparator.py # SSIM comparison and diff heatmap generation
 └── utils/
     ├── logger.py
-    └── file_helper.py
+    ├── file_helper.py
+    └── margin_helper.py    # CropBox margin application (mm → pt, page scope)
 ```
 
 ## Core Algorithm: Mask Resolver Loop
@@ -81,9 +83,11 @@ Convergence condition: final SSIM ≥ 0.95 vs. initial text-removed Reference. P
 |-------------|-------------|-----------|-----------------|
 | Text objects | `BT...ET` | keep | remove |
 | Image XObjects | `Do` | remove | keep |
-| Fill paths (background) | `f / F / f*` | remove | keep |
-| Clipping paths | `W / W*` + clip | remove | loop-processed |
-| Stroke paths | `S / s` | remove | keep (usually) |
+| White fill paths (masks) | `f / F / f*` (white fill) | keep as white rect | keep |
+| Coloured fill paths | `f / F / f*` (non-white) | remove | keep |
+| Clipping paths | `W / W*` + `n` | keep clip, drop paint | loop-processed |
+| Stroke paths | `S / s` | remove | keep |
+| Inline images | `BI...EI` | remove | keep |
 
 ## Key Configuration Parameters (defaults)
 
@@ -93,8 +97,21 @@ Convergence condition: final SSIM ≥ 0.95 vs. initial text-removed Reference. P
 | SSIM threshold | 0.95 | Threshold to confirm component removal |
 | Max iterations | 200 | Per-page component comparison limit |
 | Multi-page parallel | Off | Uses threading; higher memory usage |
+| Margins (top/bottom/left/right) | 0 mm | Applied via CropBox after saving; scope: all/odd/even/range |
 
 If memory is insufficient for a large PDF, auto-retry at 150 DPI.
+
+## `filter_text_layer` — Key Invariants
+
+`engine/pdf_parser.py:filter_text_layer` is the most complex function. Critical design decisions:
+
+- **`fill_white_stack`** default is `[False]` (PDF default fill colour is black). This stack tracks whether current fill is white across `q`/`Q` nesting.
+- **`cs`/`sc`/`scn`** (alternate colorspace operators) are treated as non-white (`_FILL_COLOUR_UNKNOWN`) because the colour value is opaque to our parser.
+- **White fill paths** (`fill_white_stack[-1] == True`) are kept and explicitly prepended with `1 g` (white fill operator) so they render white regardless of surrounding state.
+- **Non-white `W f`** (clip + coloured fill): clip is preserved but paint is converted to `n` (no paint) to avoid coloured backgrounds bleeding into text layer.
+- **`q`/`Q`** are always emitted to result so clip paths stay scoped and don't accumulate globally (without this, intersecting clips produce blank pages).
+- **`state_ops`** (colour/line-width ops outside `BT…ET`) are injected just before the next `BT` so text colour is inherited correctly.
+- **Strokes (`S`/`s`)** are always dropped from text layer.
 
 ## GUI (Tkinter + ttk)
 

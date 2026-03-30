@@ -26,6 +26,7 @@ from engine.layer_extractor import ProcessingEngine
 from gui.compare_panel import ComparePanel
 from gui.preview_panel import PreviewPanel
 from gui.settings_dialog import SettingsDialog
+from gui.margin_dialog import MarginDialog
 from utils.logger import logger
 
 
@@ -47,6 +48,7 @@ class MainWindow(ttk.Frame):
         root.minsize(1000, 620)
 
         self._settings = dict(self.DEFAULT_SETTINGS)
+        self._margin_settings: dict = {}   # empty = no margins
         self._pdf_path: str | None = None
         self._doc: fitz.Document | None = None
         self._engine: ProcessingEngine | None = None
@@ -92,6 +94,9 @@ class MainWindow(ttk.Frame):
         ttk.Separator(tb, orient='vertical').pack(side='left', fill='y', padx=6)
 
         ttk.Button(tb, text="⚙ Settings", command=self._open_settings).pack(
+            side='left', padx=3)
+
+        ttk.Button(tb, text="📐 頁邊距", command=self._open_margins).pack(
             side='left', padx=3)
 
         self._file_label = ttk.Label(tb, text="No file loaded", foreground='gray')
@@ -193,6 +198,7 @@ class MainWindow(ttk.Frame):
             max_iterations=self._settings['max_iterations'],
             output_dir=out_dir,
             parallel_pages=self._settings['parallel_pages'],
+            margin_settings=self._margin_settings,
         )
         self._engine.start(self._pdf_path, callback=self._engine_callback)
         self._set_status("Processing …")
@@ -212,6 +218,16 @@ class MainWindow(ttk.Frame):
             self._settings.update(result)
             self._compare.ssim_threshold = self._settings['ssim_threshold']
             logger.info(f"Settings updated: {result}")
+
+    def _open_margins(self):
+        dlg = MarginDialog(self.root, self._margin_settings)
+        self.root.wait_window(dlg)
+        result = dlg.get_result()
+        if result is not None:
+            # Only store non-zero margin settings
+            has_margin = any(result.get(k, 0) != 0 for k in ('top', 'bottom', 'left', 'right'))
+            self._margin_settings = result if has_margin else {}
+            logger.info(f"Margin settings updated: {result}")
 
     def _on_page_select(self, page_index: int):
         self._current_page = page_index
