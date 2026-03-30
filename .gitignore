@@ -1,6 +1,7 @@
 pdf-assets/
 test_output/
 .claude/
+venv/
 __pycache__/
 *.pyc
 *.pyo
