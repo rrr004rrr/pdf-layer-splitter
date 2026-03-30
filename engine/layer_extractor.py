@@ -9,8 +9,8 @@ Processing flow
 1. Validate that the PDF is not encrypted.
 2. For each page:
    a. Text layer  – filter content stream to BT…ET only, prepend white bg.
-   b. Background  – filter content stream to remove BT…ET, run mask resolver.
-      The final rendered image for each page is embedded into bg_layer.pdf.
+   b. Background  – filter content stream to remove BT…ET; the page is
+      copied as a vector PDF (all layers preserved, no rasterisation).
 3. Save text_layer.pdf and bg_layer.pdf to output_dir.
 """
 
@@ -22,12 +22,8 @@ import threading
 from typing import Callable
 
 import fitz
-import numpy as np
-from PIL import Image
 
 from .pdf_parser import filter_text_layer, filter_bg_layer, tokenize, tokens_to_bytes
-from .image_comparator import render_page
-from .mask_resolver import resolve_page
 from utils.logger import logger
 from utils.file_helper import is_encrypted
 from utils.margin_helper import apply_margins
@@ -79,17 +75,6 @@ def _set_tokens(doc: fitz.Document, page: fitz.Page, tokens: list[str]) -> None:
     if contents:
         doc.update_stream(contents[0], data)
 
-
-def _img_to_pdf_page(out_doc: fitz.Document, img_array: np.ndarray,
-                      width: float, height: float) -> None:
-    """Embed an RGB numpy image into a new page of out_doc."""
-    new_page = out_doc.new_page(width=width, height=height)
-    pil_img = Image.fromarray(img_array)
-    buf = io.BytesIO()
-    pil_img.save(buf, format='PNG')
-    buf.seek(0)
-    rect = fitz.Rect(0, 0, width, height)
-    new_page.insert_image(rect, stream=buf.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +186,7 @@ class ProcessingEngine:
             apply_margins(text_out, self.margin_settings)
             logger.info(f"Margins applied to text layer")
 
-        # ---- Phase 2: background layer with mask resolver ----------------
+        # ---- Phase 2: background layer (vector, BT…ET removed) ----------
         logger.info("Phase 2: Extracting background layer …")
         bg_out_doc = fitz.open()
 
@@ -211,34 +196,19 @@ class ProcessingEngine:
 
             logger.info(f"  Background page {i+1}/{n}: removing text …")
 
-            # Build a working copy for this page's mask-resolver run
             work_doc = _copy_doc(orig_doc)
             work_page = work_doc[i]
             tokens = _get_tokens(work_doc, work_page)
             bg_toks = filter_bg_layer(tokens)
             _set_tokens(work_doc, work_page, bg_toks)
 
-            # Iteration callback – forwards images to the GUI callback
-            def _iter_cb(ref_img, cand_img, heatmap, score, action, iteration,
-                         _page=i, _n=n):
-                logger.debug(
-                    f"    p{_page+1} iter={iteration} ssim={score:.4f} action={action}"
-                )
-                if cb:
-                    cb('bg_layer', _page, _n, ref_img, cand_img, heatmap, score, action)
-
-            final_img = resolve_page(
-                work_doc, i,
-                dpi=self.dpi,
-                ssim_threshold=self.ssim_threshold,
-                max_iterations=self.max_iterations,
-                callback=_iter_cb,
-            )
+            # Copy the vector page directly – preserves all layers/objects
+            bg_out_doc.insert_pdf(work_doc, from_page=i, to_page=i)
             work_doc.close()
 
-            orig_rect = orig_doc[i].rect
-            _img_to_pdf_page(bg_out_doc, final_img, orig_rect.width, orig_rect.height)
             logger.info(f"  Background page {i+1}/{n} done.")
+            if cb:
+                cb('bg_layer', i, n, None, None, None, 0.0, 'extracting')
 
         bg_out_doc.save(bg_out, deflate=True)
         bg_out_doc.close()

@@ -263,128 +263,58 @@ def filter_text_layer(tokens: list[str]) -> list[str]:
     """
     Return a token list for the text layer.
 
-    1. **Colour preservation** – graphics-state operators (colour, line-width,
-       etc.) that appear outside BT…ET are accumulated and injected just before
-       each BT block so text retains its original fill colour.
+    Keeps only BT…ET text blocks and the graphics-state colour/property
+    operators needed to preserve text colour.  All images (BI…EI, Do),
+    paths, and XObjects are dropped.
 
-    2. **White-mask preservation** – fill paths whose current fill colour is
-       white (or near-white) are kept, because they act as masking rectangles
-       that hide background text / answer labels.  Stroke paths (borders,
-       underlines) are also kept.
-
-    3. **q/Q preservation** – graphics-state save/restore operators are emitted
-       so that clipping paths stay scoped and do not accumulate globally.
-
-    Inline images (BI…EI) and XObject invocations (Do) are always dropped.
+    q/Q pairs are forwarded so that graphics-state nesting is maintained
+    and text colour inherited from enclosing q blocks is preserved.
     """
     result: list[str] = []
-
-    in_bt        = False
-    in_bi        = False
-    pending: list[str]   = []   # operand buffer (reset after each operator)
-    state_ops: list[str] = []   # colour/state ops to inject before next BT
-    path_buf: list[str]  = []   # current path construction tokens
-    clip_pending = False         # saw W / W* in this path → it's a clip
-
-    # Track fill colour across q / Q nesting (stack, approach 1)
-    fill_white_stack: list[bool] = [False]  # default: non-white (PDF default fill is black)
-
-    def fill_white() -> bool:
-        return fill_white_stack[-1]
+    in_bt = False
+    in_bi = False
+    pending: list[str] = []
+    state_ops: list[str] = []
 
     for tok in tokens:
-        # ---- inline image -------------------------------------------------
+        # Drop inline images entirely
         if tok == 'BI':
-            in_bi = True; pending = []; path_buf = []
-            continue
+            in_bi = True; pending = []; continue
         if tok == 'EI':
             in_bi = False; continue
         if in_bi:
             continue
 
-        # ---- inside BT…ET → keep everything --------------------------------
         if tok == 'BT':
             result.extend(state_ops)
-            state_ops = []; pending = []; path_buf = []
+            state_ops = []
             in_bt = True
             result.append(tok)
         elif tok == 'ET':
             result.append(tok)
-            in_bt = False; pending = []; path_buf = []
+            in_bt = False
+            pending = []
         elif in_bt:
             result.append(tok)
 
-        # ---- outside BT…ET -------------------------------------------------
+        # Outside BT…ET
         else:
             if not _is_operator(tok):
                 pending.append(tok)
-                continue
-
-            # --- graphics-state save / restore ---
-            if tok == 'q':
-                fill_white_stack.append(fill_white())
+            elif tok == 'q':
                 result.append(tok)
                 pending = []
             elif tok == 'Q':
-                if len(fill_white_stack) > 1:
-                    fill_white_stack.pop()
                 result.append(tok)
                 pending = []
-
-            # --- inherited state (colour, line-width …) ---
             elif tok in _INHERITED_OPS:
-                if tok in _FILL_COLOUR_OPS:
-                    fill_white_stack[-1] = _colour_is_white(tok, pending)
-                elif tok in _FILL_COLOUR_UNKNOWN:
-                    # Alternate colorspace – colour value is opaque; assume non-white.
-                    fill_white_stack[-1] = False
+                # Accumulate colour/state ops to inject before the next BT
                 state_ops.extend(pending)
                 state_ops.append(tok)
                 pending = []
-
-            # --- path construction ---
-            elif tok in _PATH_OPS:
-                path_buf.extend(pending)
-                path_buf.append(tok)
-                pending = []
-
-            # --- clip marker (W / W*) ---
-            elif tok in _CLIP_OPS:
-                path_buf.extend(pending)
-                path_buf.append(tok)
-                clip_pending = True
-                pending = []
-
-            # --- fill / stroke operators ---
-            elif tok in _FILL_OPS:
-                if fill_white():
-                    # White mask rect: explicitly set fill to white so the path
-                    # renders white regardless of the inherited colour state.
-                    result += ['1', 'g']
-                    result.extend(path_buf)
-                    result.extend(pending)
-                    result.append(tok)
-                elif clip_pending:
-                    # Non-white fill that includes a clip (W f / W* f etc.):
-                    # preserve the clip path but drop the paint (W f → W n).
-                    result.extend(path_buf)
-                    result.extend(pending)
-                    result.append('n')
-                path_buf = []; clip_pending = False; pending = []
-
-            elif tok in _STROKE_OPS:               # drop – strokes belong to background layer
-                path_buf = []; clip_pending = False; pending = []
-
-            elif tok == 'n':                        # end-path (no paint)
-                if clip_pending:                    # keep clip paths
-                    result.extend(path_buf)
-                    result.extend(pending)
-                    result.append(tok)
-                path_buf = []; clip_pending = False; pending = []
-
             else:
-                # Do, cm, and anything else outside BT → discard
-                path_buf = []; pending = []
+                # Do, path ops, paint ops, cm, etc. → drop
+                pending = []
 
     return result
 
